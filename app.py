@@ -5,6 +5,8 @@ import tempfile
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import ffmpeg
+from dotenv import load_dotenv
+load_dotenv()
 
 BUCKET = "reflexu"
 ORIGINALS_PREFIX = "originals/"
@@ -22,9 +24,8 @@ def list_originals():
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=BUCKET, Prefix=ORIGINALS_PREFIX):
         for obj in page.get("Contents", []):
-            if obj["Key"].endswith("/"):
-                continue
-            yield obj["Key"]
+            if not obj["Key"].endswith("/"):
+                yield obj["Key"]
 
 def watermark_image(data: bytes) -> bytes:
     with Image.open(BytesIO(data)) as im:
@@ -53,7 +54,12 @@ def watermark_video(data: bytes) -> bytes:
             box=1,
             boxcolor="black@0.5",
             boxborderw=5
-        ).output(output_file.name, vcodec="libx264", crf=28, preset="veryfast").run()
+        ).output(
+            output_file.name,
+            vcodec="libx264",
+            crf=28,
+            preset="veryfast"
+        ).overwrite_output().run()
 
         return output_file.read()
 
@@ -62,23 +68,24 @@ def process_file(key: str):
     name, ext = os.path.splitext(base)
     watermark_key = f"{WATERMARKS_PREFIX}{name}-watermark{ext}"
 
-    # Check if watermarked version exists
+    # Skip if already processed
     try:
         s3.head_object(Bucket=BUCKET, Key=watermark_key)
-        print(f"Already processed: {key}")
+        print(f"✅ Already exists: {watermark_key}")
         return
     except s3.exceptions.ClientError:
-        pass  # Continue
+        pass  # Not found, continue
 
+    # Download original file
     obj = s3.get_object(Bucket=BUCKET, Key=key)
     data = obj["Body"].read()
 
     kind = filetype.guess(data)
     if not kind:
-        print(f"Unknown type: {key}")
+        print(f"⚠️ Unknown file type: {key}")
         return
 
-    print(f"Processing {key} as {kind.mime}...")
+    print(f"▶️ Processing {key} as {kind.mime}...")
 
     if kind.mime.startswith("image/"):
         result = watermark_image(data)
@@ -87,9 +94,10 @@ def process_file(key: str):
         result = watermark_video(data)
         content_type = "video/mp4"
     else:
-        print(f"Unsupported type: {key}")
+        print(f"❌ Unsupported type: {kind.mime}")
         return
 
+    # Upload watermarked file
     s3.put_object(
         Bucket=BUCKET,
         Key=watermark_key,
@@ -97,7 +105,10 @@ def process_file(key: str):
         ACL="public-read",
         ContentType=content_type,
     )
-    print(f"Uploaded: {watermark_key}")
+
+    public_url = f"https://{BUCKET}.{os.getenv('DO_SPACES_ENDPOINT').replace('https://', '')}/{watermark_key}"
+    print(f"✅ Uploaded: {watermark_key}")
+    print(f"🌐 Public URL: {public_url}")
 
 def main():
     for key in list_originals():
