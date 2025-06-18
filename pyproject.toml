@@ -1,0 +1,9 @@
+[project]
+name = "reflexu-watermark-worker"
+version = "0.1.0"
+dependencies = [
+    "boto3",
+    "pillow",
+    "ffmpeg-python",
+    "filetype"
+]
