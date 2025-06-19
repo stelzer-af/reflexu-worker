@@ -239,10 +239,10 @@ async fn watermark_video(input_bytes: &[u8], watermark_text: &str) -> Result<Vec
 
     println!("🎬 Starting ffmpeg process...");
     
-    // Simplified watermark - just center text to reduce complexity
+    // Create diagonal repeated watermarks like the image version
     let watermark_filter = format!(
-        "drawtext=text='{}':fontcolor=white@0.4:fontsize=h/20:x=(w-text_w)/2:y=(h-text_h)/2",
-        watermark_text
+        "drawtext=text='{}':fontcolor=white@0.3:fontsize=h/25:x=w/6:y=h/6,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/25:x=w/2:y=h/6,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/25:x=5*w/6:y=h/6,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/25:x=w/6:y=h/2,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/25:x=w/2:y=h/2,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/25:x=5*w/6:y=h/2,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/25:x=w/6:y=5*h/6,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/25:x=w/2:y=5*h/6,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/25:x=5*w/6:y=5*h/6",
+        watermark_text, watermark_text, watermark_text, watermark_text, watermark_text, watermark_text, watermark_text, watermark_text, watermark_text
     );
     
     let mut cmd = Command::new("ffmpeg");
