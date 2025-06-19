@@ -11,6 +11,8 @@ workers:
   instance_count: 1
   instance_size_slug: basic-xxs
   run_command: /worker
+  health_check:
+    enabled: false
   envs:
   - key: DO_SPACES_ENDPOINT
     value: https://nyc3.digitaloceanspaces.com
