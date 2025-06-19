@@ -130,7 +130,7 @@ async fn process_files() -> Result<(), Box<dyn std::error::Error>> {
                 "mp4" | "mov" | "webm" => {
                     // Skip very large videos to avoid resource issues
                     let file_size_mb = body.len() as f64 / 1024.0 / 1024.0;
-                    if file_size_mb > 100.0 {
+                    if file_size_mb > 300.0 {
                         eprintln!("⚠️  Skipping large video ({}MB): {}", file_size_mb as u32, filename);
                         continue;
                     }
