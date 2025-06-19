@@ -216,8 +216,14 @@ async fn watermark_video(input_bytes: &[u8], watermark_text: &str) -> Result<Vec
     let input_file = NamedTempFile::with_suffix(".mp4")?.into_temp_path();
     let output_file = NamedTempFile::with_suffix(".mp4")?.into_temp_path();
 
-    fs::write(&input_file, input_bytes).await?;
+    println!("📁 Input file: {}", input_file.display());
+    println!("📁 Output file: {}", output_file.display());
+    println!("📊 Input size: {} bytes", input_bytes.len());
 
+    fs::write(&input_file, input_bytes).await?;
+    println!("✅ Wrote input file successfully");
+
+    println!("🎬 Starting ffmpeg process...");
     let ffmpeg_output = Command::new("ffmpeg")
         .args([
             "-y",
@@ -229,11 +235,14 @@ async fn watermark_video(input_bytes: &[u8], watermark_text: &str) -> Result<Vec
             ),
             "-c:v", "libx264",
             "-crf", "28",
-            "-preset", "veryfast",
+            "-preset", "ultrafast",
+            "-threads", "2",
             "-an",
             output_file.to_str().unwrap(),
         ])
         .output()?;
+    
+    println!("🎬 FFmpeg process completed");
 
     if !ffmpeg_output.status.success() {
         let stderr = String::from_utf8_lossy(&ffmpeg_output.stderr);
@@ -244,7 +253,18 @@ async fn watermark_video(input_bytes: &[u8], watermark_text: &str) -> Result<Vec
         return Err(format!("FFmpeg command failed with exit code: {}", ffmpeg_output.status.code().unwrap_or(-1)).into());
     }
 
-    let result_bytes = fs::read(output_file).await?;
+    // Check if output file exists and has content
+    if !output_file.exists() {
+        return Err("Output file was not created by ffmpeg".into());
+    }
+
+    let result_bytes = fs::read(&output_file).await?;
+    println!("📊 Output size: {} bytes", result_bytes.len());
+    
+    if result_bytes.is_empty() {
+        return Err("Output file is empty".into());
+    }
+
     Ok(result_bytes)
 }
 
