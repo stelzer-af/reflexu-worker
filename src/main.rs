@@ -9,6 +9,11 @@ use tempfile::NamedTempFile;
 use tokio::fs;
 use aws_config::BehaviorVersion;
 use tokio::time::{sleep, Duration};
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{Request, Response, body::Incoming as IncomingBody};
+use hyper_util::rt::TokioIo;
+use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,6 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(30);
         
         println!("🔄 Starting continuous worker (interval: {} minutes)", interval_minutes);
+        
+        // Start health check server
+        tokio::spawn(start_health_server());
         
         loop {
             match process_files().await {
@@ -223,4 +231,27 @@ async fn watermark_video(input_bytes: &[u8], watermark_text: &str) -> Result<Vec
 
     let result_bytes = fs::read(output_file).await?;
     Ok(result_bytes)
+}
+
+async fn start_health_server() {
+    let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    println!("🔧 Health check server listening on port 8080");
+
+    loop {
+        let (stream, _) = listener.accept().await.unwrap();
+        let io = TokioIo::new(stream);
+
+        tokio::task::spawn(async move {
+            if let Err(err) = http1::Builder::new()
+                .serve_connection(io, service_fn(health_handler))
+                .await
+            {
+                println!("Error serving connection: {:?}", err);
+            }
+        });
+    }
+}
+
+async fn health_handler(_req: Request<IncomingBody>) -> Result<Response<String>, hyper::Error> {
+    Ok(Response::new("OK".to_string()))
 }
