@@ -1,4 +1,4 @@
-FROM rustlang/rust:nightly AS builder
+FROM rustlang/rust:nightly-bookworm AS builder
 WORKDIR /app
 
 # Copy all files first
@@ -11,8 +11,8 @@ RUN rm -rf ~/.cargo/registry/index/* 2>/dev/null || true
 # Build the project
 RUN cargo build --release
 
-FROM debian:bullseye-slim
-RUN apt update && apt install -y ca-certificates ffmpeg
+FROM debian:bookworm-slim
+RUN apt update && apt install -y ca-certificates ffmpeg && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/reflexu_worker_rust /worker
 COPY fonts/DejaVuSans-Bold.ttf /fonts/DejaVuSans-Bold.ttf
 WORKDIR /app
