@@ -10,6 +10,9 @@ workers:
   dockerfile_path: Dockerfile
   instance_count: 1
   instance_size_slug: basic-xxs
+  # Disable health checks for workers
+  health_check:
+    http_path: ""
   envs:
   - key: DO_SPACES_ENDPOINT
     value: https://nyc3.digitaloceanspaces.com
