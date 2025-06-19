@@ -130,20 +130,30 @@ async fn process_files() -> Result<(), Box<dyn std::error::Error>> {
                 "mp4" | "mov" | "webm" => {
                     println!("🎬 Watermarking video...");
                     let content = match watermark_video(&body, "REFLEXU PREVIEW").await {
-                        Ok(v) => v,
+                        Ok(v) => {
+                            println!("✅ Video watermarking completed, size: {} bytes", v.len());
+                            v
+                        },
                         Err(e) => {
                             eprintln!("❌ Failed to watermark video {}: {}", filename, e);
                             continue;
                         }
                     };
 
-                    client.put_object()
+                    println!("📤 Uploading watermarked video to: {}", dest_key);
+                    match client.put_object()
                         .bucket(bucket)
                         .key(&dest_key)
                         .body(content.into())
                         .acl(ObjectCannedAcl::PublicRead)
                         .send()
-                        .await?;
+                        .await {
+                        Ok(_) => println!("✅ Video upload completed: {}", dest_key),
+                        Err(e) => {
+                            eprintln!("❌ Failed to upload video {}: {}", dest_key, e);
+                            continue;
+                        }
+                    };
                 }
                 _ => {
                     println!("❌ Unsupported file type: {}", filename);
@@ -208,7 +218,7 @@ async fn watermark_video(input_bytes: &[u8], watermark_text: &str) -> Result<Vec
 
     fs::write(&input_file, input_bytes).await?;
 
-    let ffmpeg_status = Command::new("ffmpeg")
+    let ffmpeg_output = Command::new("ffmpeg")
         .args([
             "-y",
             "-i", input_file.to_str().unwrap(),
@@ -223,10 +233,15 @@ async fn watermark_video(input_bytes: &[u8], watermark_text: &str) -> Result<Vec
             "-an",
             output_file.to_str().unwrap(),
         ])
-        .status()?;
+        .output()?;
 
-    if !ffmpeg_status.success() {
-        return Err("❌ FFmpeg command failed.".into());
+    if !ffmpeg_output.status.success() {
+        let stderr = String::from_utf8_lossy(&ffmpeg_output.stderr);
+        let stdout = String::from_utf8_lossy(&ffmpeg_output.stdout);
+        eprintln!("❌ FFmpeg failed with exit code: {}", ffmpeg_output.status.code().unwrap_or(-1));
+        eprintln!("❌ FFmpeg stderr: {}", stderr);
+        eprintln!("❌ FFmpeg stdout: {}", stdout);
+        return Err(format!("FFmpeg command failed with exit code: {}", ffmpeg_output.status.code().unwrap_or(-1)).into());
     }
 
     let result_bytes = fs::read(output_file).await?;
