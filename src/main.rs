@@ -8,10 +8,41 @@ use rusttype::{Font, Scale};
 use tempfile::NamedTempFile;
 use tokio::fs;
 use aws_config::BehaviorVersion;
+use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
+    
+    // Check if we should run once or continuously
+    let run_once = env::var("RUN_ONCE").unwrap_or_default() == "true";
+    
+    if run_once {
+        process_files().await?;
+    } else {
+        // Run continuously with configurable interval
+        let interval_minutes = env::var("INTERVAL_MINUTES")
+            .unwrap_or_else(|_| "30".to_string())
+            .parse::<u64>()
+            .unwrap_or(30);
+        
+        println!("🔄 Starting continuous worker (interval: {} minutes)", interval_minutes);
+        
+        loop {
+            match process_files().await {
+                Ok(_) => println!("✅ Processing cycle completed"),
+                Err(e) => eprintln!("❌ Processing cycle failed: {}", e),
+            }
+            
+            println!("⏳ Waiting {} minutes until next cycle...", interval_minutes);
+            sleep(Duration::from_secs(interval_minutes * 60)).await;
+        }
+    }
+    
+    Ok(())
+}
+
+async fn process_files() -> Result<(), Box<dyn std::error::Error>> {
 
     let bucket = "reflexu";
     let originals_prefix = "originals/";

@@ -1,0 +1,25 @@
+name: reflexu-worker
+region: nyc
+
+workers:
+- name: watermark-processor
+  source_dir: /
+  github:
+    repo: stelzer-af/reflexu-worker
+    branch: main
+  dockerfile_path: Dockerfile
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  envs:
+  - key: DO_SPACES_ENDPOINT
+    value: https://nyc3.digitaloceanspaces.com
+  - key: DO_SPACES_KEY
+    value: ${DO_SPACES_KEY}
+    type: SECRET
+  - key: DO_SPACES_SECRET
+    value: ${DO_SPACES_SECRET}
+    type: SECRET
+  - key: INTERVAL_MINUTES
+    value: "1"
+  - key: RUN_ONCE
+    value: "false"
