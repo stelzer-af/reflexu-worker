@@ -15,9 +15,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
     
     // Check if we should run once or continuously
-    let run_once = env::var("RUN_ONCE").unwrap_or_default() == "true";
+    let run_once_env = env::var("RUN_ONCE").unwrap_or_default();
+    let run_once = run_once_env == "true";
+    
+    println!("🔧 RUN_ONCE environment variable: '{}' (parsed as: {})", run_once_env, run_once);
     
     if run_once {
+        println!("▶️  Running in one-time mode");
         process_files().await?;
     } else {
         // Run continuously with configurable interval

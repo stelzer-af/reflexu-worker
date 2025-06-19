@@ -10,6 +10,7 @@ workers:
   dockerfile_path: Dockerfile
   instance_count: 1
   instance_size_slug: basic-xxs
+  run_command: /worker
   envs:
   - key: DO_SPACES_ENDPOINT
     value: https://nyc3.digitaloceanspaces.com
