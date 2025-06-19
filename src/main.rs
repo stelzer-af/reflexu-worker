@@ -49,9 +49,12 @@ async fn process_files() -> Result<(), Box<dyn std::error::Error>> {
     let watermarks_prefix = "watermarks/";
 
     let region = Region::new("nyc3");
-    let endpoint_url = env::var("DO_SPACES_ENDPOINT")?;
-    let access_key = env::var("DO_SPACES_KEY")?;
-    let secret_key = env::var("DO_SPACES_SECRET")?;
+    let endpoint_url = env::var("DO_SPACES_ENDPOINT")
+        .map_err(|_| "DO_SPACES_ENDPOINT environment variable not found")?;
+    let access_key = env::var("DO_SPACES_KEY")
+        .map_err(|_| "DO_SPACES_KEY environment variable not found")?;
+    let secret_key = env::var("DO_SPACES_SECRET")
+        .map_err(|_| "DO_SPACES_SECRET environment variable not found")?;
 
     let credentials = Credentials::new(access_key, secret_key, None, None, "do-spaces");
 
