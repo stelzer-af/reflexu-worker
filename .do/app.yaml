@@ -1,9 +1,8 @@
 name: reflexu-worker
 region: nyc
 
-jobs:
+workers:
 - name: watermark-processor
-  kind: WORKER
   source_dir: /
   github:
     repo: stelzer-af/reflexu-worker
