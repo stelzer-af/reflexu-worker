@@ -195,7 +195,7 @@ cython_debug/
 
 # Rust
 /target/
-Cargo.lock
+# Cargo.lock (commented out - we want to commit it for applications)
 
 # macOS
 .DS_Store
