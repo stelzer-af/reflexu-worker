@@ -1,6 +1,6 @@
 use aws_sdk_s3::{Client, config::Region, types::ObjectCannedAcl};
 use aws_sdk_s3::config::Credentials;
-use std::{env, path::PathBuf, process::Command, io::Cursor};
+use std::{env, path::PathBuf, process::Command, io::Cursor, time::Duration as StdDuration};
 use dotenv::dotenv;
 use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
 use imageproc::drawing::draw_text_mut;
@@ -128,14 +128,28 @@ async fn process_files() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                 }
                 "mp4" | "mov" | "webm" => {
-                    println!("🎬 Watermarking video...");
-                    let content = match watermark_video(&body, "REFLEXU PREVIEW").await {
-                        Ok(v) => {
+                    // Skip very large videos to avoid resource issues
+                    let file_size_mb = body.len() as f64 / 1024.0 / 1024.0;
+                    if file_size_mb > 100.0 {
+                        eprintln!("⚠️  Skipping large video ({}MB): {}", file_size_mb as u32, filename);
+                        continue;
+                    }
+                    
+                    println!("🎬 Watermarking video ({:.1}MB)...", file_size_mb);
+                    
+                    // Add timeout to prevent hanging
+                    let timeout_duration = Duration::from_secs(300); // 5 minutes max
+                    let content = match tokio::time::timeout(timeout_duration, watermark_video(&body, "REFLEXU PREVIEW")).await {
+                        Ok(Ok(v)) => {
                             println!("✅ Video watermarking completed, size: {} bytes", v.len());
                             v
                         },
-                        Err(e) => {
+                        Ok(Err(e)) => {
                             eprintln!("❌ Failed to watermark video {}: {}", filename, e);
+                            continue;
+                        },
+                        Err(_) => {
+                            eprintln!("❌ Video watermarking timed out after 5 minutes: {}", filename);
                             continue;
                         }
                     };
@@ -224,23 +238,28 @@ async fn watermark_video(input_bytes: &[u8], watermark_text: &str) -> Result<Vec
     println!("✅ Wrote input file successfully");
 
     println!("🎬 Starting ffmpeg process...");
-    let ffmpeg_output = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-i", input_file.to_str().unwrap(),
-            "-vf",
-            &format!(
-                "drawtext=text='{}':fontcolor=white@0.3:fontsize=h/15:x=w/6:y=h/6,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/15:x=w/2:y=h/6,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/15:x=5*w/6:y=h/6,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/15:x=w/6:y=h/2,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/15:x=5*w/6:y=h/2,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/15:x=w/6:y=5*h/6,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/15:x=w/2:y=5*h/6,drawtext=text='{}':fontcolor=white@0.3:fontsize=h/15:x=5*w/6:y=5*h/6",
-                watermark_text, watermark_text, watermark_text, watermark_text, watermark_text, watermark_text, watermark_text, watermark_text
-            ),
-            "-c:v", "libx264",
-            "-crf", "28",
-            "-preset", "ultrafast",
-            "-threads", "2",
-            "-an",
-            output_file.to_str().unwrap(),
-        ])
-        .output()?;
+    
+    // Simplified watermark - just center text to reduce complexity
+    let watermark_filter = format!(
+        "drawtext=text='{}':fontcolor=white@0.4:fontsize=h/20:x=(w-text_w)/2:y=(h-text_h)/2",
+        watermark_text
+    );
+    
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args([
+        "-y",
+        "-i", input_file.to_str().unwrap(),
+        "-vf", &watermark_filter,
+        "-c:v", "libx264",
+        "-crf", "30", // Higher CRF for smaller file
+        "-preset", "ultrafast",
+        "-threads", "1", // Single thread to reduce resource usage
+        "-movflags", "+faststart", // Optimize for streaming
+        "-an", // No audio
+        output_file.to_str().unwrap(),
+    ]);
+    
+    let ffmpeg_output = cmd.output()?;
     
     println!("🎬 FFmpeg process completed");
 
