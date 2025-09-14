@@ -1,6 +1,6 @@
 use aws_sdk_s3::{Client, config::Region, types::ObjectCannedAcl};
 use aws_sdk_s3::config::Credentials;
-use std::{env, path::PathBuf, process::Command, io::Cursor, time::Duration as StdDuration};
+use std::{env, path::PathBuf, process::Command, io::Cursor};
 use dotenv::dotenv;
 use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
 use imageproc::drawing::draw_text_mut;
