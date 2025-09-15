@@ -116,7 +116,7 @@ async fn process_files() -> Result<(), Box<dyn std::error::Error>> {
                     let watermarked = watermark_image(img, "REFLEXU PREVIEW");
 
                     let mut buf = Cursor::new(Vec::new());
-                    watermarked.write_to(&mut buf, image::ImageOutputFormat::Jpeg(25))?;
+                    watermarked.write_to(&mut buf, image::ImageOutputFormat::Jpeg(5))?;
                     let final_bytes = buf.into_inner();
 
                     client.put_object()
