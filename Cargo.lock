@@ -2131,6 +2131,7 @@ dependencies = [
  "hyper-util",
  "image",
  "imageproc",
+ "regex",
  "rusttype",
  "tempfile",
  "tokio",

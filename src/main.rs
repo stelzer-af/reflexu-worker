@@ -1,6 +1,7 @@
 use aws_sdk_s3::{Client, config::Region, types::ObjectCannedAcl};
 use aws_sdk_s3::config::Credentials;
 use std::{env, path::PathBuf, process::Command, io::Cursor};
+use regex::Regex;
 use dotenv::dotenv;
 use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
 use imageproc::drawing::draw_text_mut;
@@ -57,8 +58,109 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn process_files() -> Result<(), Box<dyn std::error::Error>> {
 
     let bucket = "reflexu";
+
+    // Check if we should use UUID-based structure
+    let use_uuid_structure = env::var("USE_UUID_STRUCTURE")
+        .unwrap_or_else(|_| "false".to_string())
+        .parse::<bool>()
+        .unwrap_or(false);
+
+    if use_uuid_structure {
+        println!("🔧 Using UUID-based folder structure");
+        process_uuid_structure(bucket).await
+    } else {
+        println!("🔧 Using legacy folder structure");
+        process_legacy_structure(bucket).await
+    }
+}
+
+async fn process_legacy_structure(bucket: &str) -> Result<(), Box<dyn std::error::Error>> {
     let originals_prefix = "originals/";
     let watermarks_prefix = "watermarks/";
+
+    process_files_in_paths(bucket, originals_prefix, watermarks_prefix).await
+}
+
+async fn process_uuid_structure(bucket: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // Discover all UUID directories at root level
+    let uuids = discover_uuids(bucket).await?;
+
+    if uuids.is_empty() {
+        println!("ℹ️  No UUID directories found");
+        return Ok(());
+    }
+
+    println!("📁 Found {} UUID directories to process", uuids.len());
+
+    for uuid in uuids {
+        println!("🔄 Processing UUID: {}", uuid);
+        let originals_prefix = format!("{}/originals/", uuid);
+        let watermarks_prefix = format!("{}/watermarks/", uuid);
+
+        match process_files_in_paths(bucket, &originals_prefix, &watermarks_prefix).await {
+            Ok(_) => println!("✅ Completed processing UUID: {}", uuid),
+            Err(e) => {
+                eprintln!("❌ Failed to process UUID {}: {}", uuid, e);
+                // Continue processing other UUIDs
+                continue;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn discover_uuids(bucket: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let region = Region::new("nyc3");
+    let endpoint_url = env::var("DO_SPACES_ENDPOINT")
+        .map_err(|_| "DO_SPACES_ENDPOINT environment variable not found")?;
+    let access_key = env::var("DO_SPACES_KEY")
+        .map_err(|_| "DO_SPACES_KEY environment variable not found")?;
+    let secret_key = env::var("DO_SPACES_SECRET")
+        .map_err(|_| "DO_SPACES_SECRET environment variable not found")?;
+
+    let credentials = Credentials::new(access_key, secret_key, None, None, "do-spaces");
+
+    let s3_config = aws_sdk_s3::config::Builder::new()
+        .behavior_version(BehaviorVersion::latest())
+        .region(region)
+        .endpoint_url(endpoint_url)
+        .credentials_provider(credentials)
+        .build();
+
+    let client = Client::from_conf(s3_config);
+
+    // List objects at root level with delimiter to get UUID directories
+    let objects = client
+        .list_objects_v2()
+        .bucket(bucket)
+        .delimiter("/")
+        .send()
+        .await?;
+
+    let uuid_regex = Regex::new(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/$")?;
+    let mut uuids = Vec::new();
+
+    // Check common prefixes (directories)
+    for prefix in objects.common_prefixes() {
+        if let Some(prefix_str) = prefix.prefix() {
+            if uuid_regex.is_match(prefix_str) {
+                // Extract UUID (remove trailing slash)
+                let uuid = prefix_str.trim_end_matches('/');
+                uuids.push(uuid.to_string());
+            }
+        }
+    }
+
+    println!("🔍 Discovered {} valid UUID directories", uuids.len());
+    for uuid in &uuids {
+        println!("   📁 {}", uuid);
+    }
+
+    Ok(uuids)
+}
+
+async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks_prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     let region = Region::new("nyc3");
     let endpoint_url = env::var("DO_SPACES_ENDPOINT")
