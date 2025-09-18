@@ -59,11 +59,11 @@ async fn process_files() -> Result<(), Box<dyn std::error::Error>> {
 
     let bucket = "reflexu";
 
-    // Discover all UUID directories at root level
+    // Discover all UUID directories under users/
     let uuids = discover_uuids(bucket).await?;
 
     if uuids.is_empty() {
-        println!("ℹ️  No UUID directories found");
+        println!("ℹ️  No UUID directories found in users/");
         return Ok(());
     }
 
@@ -71,8 +71,8 @@ async fn process_files() -> Result<(), Box<dyn std::error::Error>> {
 
     for uuid in uuids {
         println!("🔄 Processing UUID: {}", uuid);
-        let originals_prefix = format!("{}/originals/", uuid);
-        let watermarks_prefix = format!("{}/watermarks/", uuid);
+        let originals_prefix = format!("users/{}/originals/", uuid);
+        let watermarks_prefix = format!("users/{}/watermarks/", uuid);
 
         match process_files_in_paths(bucket, &originals_prefix, &watermarks_prefix).await {
             Ok(_) => println!("✅ Completed processing UUID: {}", uuid),
@@ -107,23 +107,24 @@ async fn discover_uuids(bucket: &str) -> Result<Vec<String>, Box<dyn std::error:
 
     let client = Client::from_conf(s3_config);
 
-    // List objects at root level with delimiter to get UUID directories
+    // List objects under users/ with delimiter to get UUID directories
     let objects = client
         .list_objects_v2()
         .bucket(bucket)
+        .prefix("users/")
         .delimiter("/")
         .send()
         .await?;
 
-    let uuid_regex = Regex::new(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/$")?;
+    let uuid_regex = Regex::new(r"^users/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/$")?;
     let mut uuids = Vec::new();
 
     // Check common prefixes (directories)
     for prefix in objects.common_prefixes() {
         if let Some(prefix_str) = prefix.prefix() {
             if uuid_regex.is_match(prefix_str) {
-                // Extract UUID (remove trailing slash)
-                let uuid = prefix_str.trim_end_matches('/');
+                // Extract UUID from "users/{uuid}/"
+                let uuid = prefix_str.strip_prefix("users/").unwrap().trim_end_matches('/');
                 uuids.push(uuid.to_string());
             }
         }
@@ -191,8 +192,25 @@ async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks
             match ext.to_lowercase().as_str() {
                 "jpg" | "jpeg" | "png" => {
                     let img = image::load_from_memory(&body)?;
-                    println!("🖋️ Watermarking image...");
-                    let watermarked = watermark_image(img, "REFLEXU PREVIEW");
+                    let (orig_width, orig_height) = img.dimensions();
+
+                    // Reduce image dimensions by 50% (or to max 1920px wide)
+                    let max_width = 1920u32;
+                    let scale_factor = if orig_width > max_width {
+                        max_width as f32 / orig_width as f32
+                    } else {
+                        0.5  // Reduce to 50% of original size
+                    };
+
+                    let new_width = (orig_width as f32 * scale_factor) as u32;
+                    let new_height = (orig_height as f32 * scale_factor) as u32;
+
+                    println!("🖋️ Watermarking image... ({}x{} → {}x{})",
+                        orig_width, orig_height, new_width, new_height);
+
+                    // Resize the image before watermarking
+                    let resized = img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3);
+                    let watermarked = watermark_image(resized, "REFLEXU PREVIEW");
 
                     let mut buf = Cursor::new(Vec::new());
                     watermarked.write_to(&mut buf, image::ImageOutputFormat::Jpeg(10))?;
