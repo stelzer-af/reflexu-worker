@@ -59,29 +59,6 @@ async fn process_files() -> Result<(), Box<dyn std::error::Error>> {
 
     let bucket = "reflexu";
 
-    // Check if we should use UUID-based structure
-    let use_uuid_structure = env::var("USE_UUID_STRUCTURE")
-        .unwrap_or_else(|_| "false".to_string())
-        .parse::<bool>()
-        .unwrap_or(false);
-
-    if use_uuid_structure {
-        println!("🔧 Using UUID-based folder structure");
-        process_uuid_structure(bucket).await
-    } else {
-        println!("🔧 Using legacy folder structure");
-        process_legacy_structure(bucket).await
-    }
-}
-
-async fn process_legacy_structure(bucket: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let originals_prefix = "originals/";
-    let watermarks_prefix = "watermarks/";
-
-    process_files_in_paths(bucket, originals_prefix, watermarks_prefix).await
-}
-
-async fn process_uuid_structure(bucket: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Discover all UUID directories at root level
     let uuids = discover_uuids(bucket).await?;
 
