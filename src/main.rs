@@ -211,8 +211,8 @@ async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks
                         let new_width = (orig_width as f32 * ratio) as u32;
                         let new_height = (orig_height as f32 * ratio) as u32;
                         println!("📐 Resizing image from {}x{} to {}x{}", orig_width, orig_height, new_width, new_height);
-                        // Use Triangle filter for much faster resizing with good quality
-                        img.resize(new_width, new_height, imageops::FilterType::Triangle)
+                        // Use Nearest filter for fastest possible resizing
+                        img.resize_exact(new_width, new_height, imageops::FilterType::Nearest)
                     } else {
                         println!("📐 Image size {}x{} is already optimal", orig_width, orig_height);
                         img
@@ -487,7 +487,7 @@ fn watermark_image_text_only(img: DynamicImage, text: &str) -> DynamicImage {
     DynamicImage::ImageRgba8(rgba)
 }
 
-async fn watermark_video(input_bytes: &[u8], watermark_text: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+async fn watermark_video(input_bytes: &[u8], _watermark_text: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let input_file = NamedTempFile::with_suffix(".mp4")?.into_temp_path();
     let output_file = NamedTempFile::with_suffix(".mp4")?.into_temp_path();
 
@@ -672,8 +672,8 @@ async fn test_local_files() -> Result<(), Box<dyn std::error::Error>> {
                     let new_width = (orig_width as f32 * ratio) as u32;
                     let new_height = (orig_height as f32 * ratio) as u32;
                     println!("📐 Resizing from {}x{} to {}x{}", orig_width, orig_height, new_width, new_height);
-                    // Use Triangle filter for much faster resizing with good quality
-                    let resized = img.resize(new_width, new_height, imageops::FilterType::Triangle);
+                    // Use Nearest filter for fastest possible resizing
+                    let resized = img.resize_exact(new_width, new_height, imageops::FilterType::Nearest);
                     println!("   Resize time: {:.2}ms", resize_start.elapsed().as_secs_f64() * 1000.0);
                     resized
                 } else {

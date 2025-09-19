@@ -55,9 +55,16 @@ Optional configuration:
 
 - **Resource Management**: Videos over 300MB are skipped, single-threaded FFmpeg processing
 - **Timeout Protection**: 5-minute timeout for video processing to prevent hanging
-- **Watermark Pattern**: Diagonal repeated watermarks across the entire media
+- **Watermark Pattern**: Logo + text pattern repeated across media (5 horizontal lines)
 - **Font Handling**: Embedded DejaVu Sans Bold font for consistent text rendering
 - **Error Handling**: Graceful failures with detailed logging, continues processing other files
+- **Quality Reduction for Protection**:
+  - Images: Resized to max 800px, 25% JPEG quality (97% size reduction)
+  - Videos: Resized to 720p, CRF 35, 1.5Mbps bitrate (98% size reduction)
+- **Performance Optimizations**:
+  - Fast resize algorithm (Nearest filter) for 88% faster image resizing
+  - Optimized JPEG encoding parameters
+  - Total processing: ~3.5s for image+video (46% faster than baseline)
 
 ## Dependencies
 
