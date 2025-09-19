@@ -198,11 +198,32 @@ async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks
             match ext.to_lowercase().as_str() {
                 "jpg" | "jpeg" | "png" => {
                     let img = image::load_from_memory(&body)?;
+                    let (orig_width, orig_height) = img.dimensions();
+
+                    // Resize image to max 800px for preview (lower quality for protection)
+                    let max_dimension = 800u32;
+                    let resized_img = if orig_width > max_dimension || orig_height > max_dimension {
+                        let ratio = if orig_width > orig_height {
+                            max_dimension as f32 / orig_width as f32
+                        } else {
+                            max_dimension as f32 / orig_height as f32
+                        };
+                        let new_width = (orig_width as f32 * ratio) as u32;
+                        let new_height = (orig_height as f32 * ratio) as u32;
+                        println!("📐 Resizing image from {}x{} to {}x{}", orig_width, orig_height, new_width, new_height);
+                        // Use Triangle filter for much faster resizing with good quality
+                        img.resize(new_width, new_height, imageops::FilterType::Triangle)
+                    } else {
+                        println!("📐 Image size {}x{} is already optimal", orig_width, orig_height);
+                        img
+                    };
+
                     println!("🖋️ Watermarking image...");
-                    let watermarked = watermark_image(img, "REFLEXU PREVIEW");
+                    let watermarked = watermark_image(resized_img, "REFLEXU PREVIEW");
 
                     let mut buf = Cursor::new(Vec::new());
-                    watermarked.write_to(&mut buf, image::ImageOutputFormat::Jpeg(10))?;
+                    // Very low JPEG quality (25%) to discourage unauthorized use
+                    watermarked.write_to(&mut buf, image::ImageOutputFormat::Jpeg(25))?;
                     let final_bytes = buf.into_inner();
 
                     client.put_object()
@@ -524,11 +545,12 @@ async fn watermark_video(input_bytes: &[u8], watermark_text: &str) -> Result<Vec
     cmd.args([
         "-y",
         "-i", input_file.to_str().unwrap(),
-        "-vf", &watermark_filter,
+        "-vf", &format!("scale=1280:-1,{}", watermark_filter), // Scale down to 1280px width (720p)
         "-c:v", "libx264",
-        "-crf", "30", // Higher CRF for smaller file
+        "-crf", "35", // Moderate quality reduction
         "-preset", "ultrafast",
         "-threads", "1", // Single thread to reduce resource usage
+        "-b:v", "1500k", // Limit bitrate to 1.5Mbps
         "-movflags", "+faststart", // Optimize for streaming
         "-an", // No audio
         output_file.to_str().unwrap(),
@@ -635,11 +657,33 @@ async fn test_local_files() -> Result<(), Box<dyn std::error::Error>> {
 
                 let decode_start = Instant::now();
                 let img = image::load_from_memory(&body)?;
-                println!("   Decode time: {:.2}ms", decode_start.elapsed().as_secs_f64() * 1000.0);
+                let (orig_width, orig_height) = img.dimensions();
+                println!("   Decode time: {:.2}ms ({}x{})", decode_start.elapsed().as_secs_f64() * 1000.0, orig_width, orig_height);
+
+                // Resize image to max 800px for preview (lower quality for protection)
+                let resize_start = Instant::now();
+                let max_dimension = 800u32;
+                let resized_img = if orig_width > max_dimension || orig_height > max_dimension {
+                    let ratio = if orig_width > orig_height {
+                        max_dimension as f32 / orig_width as f32
+                    } else {
+                        max_dimension as f32 / orig_height as f32
+                    };
+                    let new_width = (orig_width as f32 * ratio) as u32;
+                    let new_height = (orig_height as f32 * ratio) as u32;
+                    println!("📐 Resizing from {}x{} to {}x{}", orig_width, orig_height, new_width, new_height);
+                    // Use Triangle filter for much faster resizing with good quality
+                    let resized = img.resize(new_width, new_height, imageops::FilterType::Triangle);
+                    println!("   Resize time: {:.2}ms", resize_start.elapsed().as_secs_f64() * 1000.0);
+                    resized
+                } else {
+                    println!("📐 Image size {}x{} is already optimal", orig_width, orig_height);
+                    img
+                };
 
                 println!("🖋️  Applying watermark...");
                 let watermark_start = Instant::now();
-                let watermarked = watermark_image(img, "REFLEXU PREVIEW");
+                let watermarked = watermark_image(resized_img, "REFLEXU PREVIEW");
                 println!("   Watermark time: {:.2}ms", watermark_start.elapsed().as_secs_f64() * 1000.0);
 
                 let output_path = output_dir.join(format!("{}-watermarked.jpg",
@@ -647,7 +691,7 @@ async fn test_local_files() -> Result<(), Box<dyn std::error::Error>> {
 
                 let encode_start = Instant::now();
                 let mut buf = Cursor::new(Vec::new());
-                watermarked.write_to(&mut buf, image::ImageOutputFormat::Jpeg(90))?;
+                watermarked.write_to(&mut buf, image::ImageOutputFormat::Jpeg(85))?;
                 println!("   Encode time: {:.2}ms", encode_start.elapsed().as_secs_f64() * 1000.0);
 
                 let write_start = Instant::now();
