@@ -50,15 +50,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut processing = false;
 
         loop {
-            if !processing {
-                processing = true;
+            if processing {
+                println!("⏭️  Skipping cycle - previous processing still in progress");
+            } else {
+                #[allow(unused_assignments)]
+                {
+                    processing = true;
+                }
                 match process_files().await {
                     Ok(_) => println!("✅ Processing cycle completed"),
                     Err(e) => eprintln!("❌ Processing cycle failed: {}", e),
                 }
                 processing = false;
-            } else {
-                println!("⏭️  Skipping cycle - previous processing still in progress");
             }
 
             println!("⏳ Waiting {} minutes until next cycle...", interval_minutes);
