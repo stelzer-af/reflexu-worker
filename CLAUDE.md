@@ -38,6 +38,7 @@ Optional configuration:
 1. **main.rs** - Entry point with two execution modes:
    - One-time processing (`RUN_ONCE=true`)
    - Continuous worker with health check server on port 8080
+   - Includes busy flag protection to prevent overlapping processing cycles
 
 2. **process_files()** - Main processing function that:
    - Lists objects in `originals/` prefix from S3-compatible storage
@@ -55,6 +56,7 @@ Optional configuration:
 
 - **Resource Management**: Videos over 300MB are skipped, single-threaded FFmpeg processing
 - **Timeout Protection**: 5-minute timeout for video processing to prevent hanging
+- **Concurrency Protection**: Busy flag prevents overlapping processing cycles in continuous mode
 - **Watermark Pattern**: Logo + text pattern repeated across media (5 horizontal lines)
 - **Font Handling**: Embedded DejaVu Sans Bold font for consistent text rendering
 - **Error Handling**: Graceful failures with detailed logging, continues processing other files

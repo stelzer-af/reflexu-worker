@@ -41,18 +41,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|_| "30".to_string())
             .parse::<u64>()
             .unwrap_or(30);
-        
+
         println!("🔄 Starting continuous worker (interval: {} minutes)", interval_minutes);
-        
+
         // Start health check server
         tokio::spawn(start_health_server());
-        
+
+        let mut processing = false;
+
         loop {
-            match process_files().await {
-                Ok(_) => println!("✅ Processing cycle completed"),
-                Err(e) => eprintln!("❌ Processing cycle failed: {}", e),
+            if !processing {
+                processing = true;
+                match process_files().await {
+                    Ok(_) => println!("✅ Processing cycle completed"),
+                    Err(e) => eprintln!("❌ Processing cycle failed: {}", e),
+                }
+                processing = false;
+            } else {
+                println!("⏭️  Skipping cycle - previous processing still in progress");
             }
-            
+
             println!("⏳ Waiting {} minutes until next cycle...", interval_minutes);
             sleep(Duration::from_secs(interval_minutes * 60)).await;
         }
