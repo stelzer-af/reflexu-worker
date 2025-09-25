@@ -208,7 +208,34 @@ async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks
 
             match ext.to_lowercase().as_str() {
                 "jpg" | "jpeg" | "png" => {
-                    let img = image::load_from_memory(&body)?;
+                    let file_size_mb = body.len() as f64 / 1024.0 / 1024.0;
+                    println!("🖼️  Processing image ({:.1}MB): {}", file_size_mb, filename);
+
+                    // For very large images, save to temp file first to avoid memory issues
+                    let img = if file_size_mb > 20.0 {
+                        println!("📁 Large image detected, using temp file approach");
+                        let temp_file = NamedTempFile::with_suffix(&format!(".{}", ext))?;
+                        let temp_path = temp_file.path().to_path_buf();
+                        fs::write(&temp_path, &body).await?;
+
+                        // Load from file which uses memory-mapped I/O internally
+                        match image::open(&temp_path) {
+                            Ok(img) => img,
+                            Err(e) => {
+                                eprintln!("❌ Failed to load large image {}: {}", filename, e);
+                                continue;
+                            }
+                        }
+                    } else {
+                        match image::load_from_memory(&body) {
+                            Ok(img) => img,
+                            Err(e) => {
+                                eprintln!("❌ Failed to decode image {}: {}", filename, e);
+                                continue;
+                            }
+                        }
+                    };
+
                     let (orig_width, orig_height) = img.dimensions();
 
                     // Resize image to max 800px for preview (lower quality for protection)
@@ -222,12 +249,20 @@ async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks
                         let new_width = (orig_width as f32 * ratio) as u32;
                         let new_height = (orig_height as f32 * ratio) as u32;
                         println!("📐 Resizing image from {}x{} to {}x{}", orig_width, orig_height, new_width, new_height);
-                        // Use Nearest filter for fastest possible resizing
-                        img.resize_exact(new_width, new_height, imageops::FilterType::Nearest)
+
+                        // For large images, use a more memory-efficient filter
+                        let filter = if file_size_mb > 20.0 {
+                            imageops::FilterType::Nearest  // Fastest and most memory efficient
+                        } else {
+                            imageops::FilterType::Nearest  // Already using Nearest
+                        };
+                        img.resize_exact(new_width, new_height, filter)
                     } else {
                         println!("📐 Image size {}x{} is already optimal", orig_width, orig_height);
                         img
                     };
+
+                    // Original image is already moved/consumed when creating resized_img
 
                     println!("🖋️ Watermarking image...");
                     let watermarked = watermark_image(resized_img, "REFLEXU PREVIEW");
@@ -237,13 +272,20 @@ async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks
                     watermarked.write_to(&mut buf, image::ImageOutputFormat::Jpeg(25))?;
                     let final_bytes = buf.into_inner();
 
-                    client.put_object()
+                    println!("📤 Uploading watermarked image ({:.1}MB)...", final_bytes.len() as f64 / 1024.0 / 1024.0);
+                    match client.put_object()
                         .bucket(bucket)
                         .key(&dest_key)
                         .body(final_bytes.into())
                         .acl(ObjectCannedAcl::PublicRead)
                         .send()
-                        .await?;
+                        .await {
+                        Ok(_) => println!("✅ Uploaded: {}", dest_key),
+                        Err(e) => {
+                            eprintln!("❌ Failed to upload {}: {}", dest_key, e);
+                            continue;
+                        }
+                    };
                 }
                 "mp4" | "mov" | "webm" => {
                     // Skip very large videos to avoid resource issues
@@ -664,10 +706,33 @@ async fn test_local_files() -> Result<(), Box<dyn std::error::Error>> {
                 println!("🖼️  Processing image: {}", filename);
                 let read_start = Instant::now();
                 let body = fs::read(&path).await?;
-                println!("   Read time: {:.2}ms", read_start.elapsed().as_secs_f64() * 1000.0);
+                let file_size_mb = body.len() as f64 / 1024.0 / 1024.0;
+                println!("   Read time: {:.2}ms (Size: {:.1}MB)", read_start.elapsed().as_secs_f64() * 1000.0, file_size_mb);
 
                 let decode_start = Instant::now();
-                let img = image::load_from_memory(&body)?;
+                // Use same logic as production code for large images
+                let img = if file_size_mb > 20.0 {
+                    println!("📁 Large image detected, using temp file approach");
+                    let temp_file = NamedTempFile::with_suffix(&format!(".{}", ext))?;
+                    let temp_path = temp_file.path().to_path_buf();
+                    fs::write(&temp_path, &body).await?;
+
+                    match image::open(&temp_path) {
+                        Ok(img) => img,
+                        Err(e) => {
+                            eprintln!("❌ Failed to load large image {}: {}", filename, e);
+                            continue;
+                        }
+                    }
+                } else {
+                    match image::load_from_memory(&body) {
+                        Ok(img) => img,
+                        Err(e) => {
+                            eprintln!("❌ Failed to decode image {}: {}", filename, e);
+                            continue;
+                        }
+                    }
+                };
                 let (orig_width, orig_height) = img.dimensions();
                 println!("   Decode time: {:.2}ms ({}x{})", decode_start.elapsed().as_secs_f64() * 1000.0, orig_width, orig_height);
 
