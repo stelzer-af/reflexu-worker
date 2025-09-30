@@ -102,9 +102,8 @@ async fn process_files() -> Result<(), Box<dyn std::error::Error>> {
             println!("   🎯 Processing event: {}", event_id);
             let originals_prefix = format!("users/{}/events/{}/originals/", user_id, event_id);
             let watermarks_prefix = format!("users/{}/events/{}/watermarks/", user_id, event_id);
-            let thumbnails_prefix = format!("users/{}/events/{}/thumbnails/", user_id, event_id);
 
-            match process_files_in_paths(bucket, &originals_prefix, &watermarks_prefix, &thumbnails_prefix).await {
+            match process_files_in_paths(bucket, &originals_prefix, &watermarks_prefix).await {
                 Ok(_) => println!("   ✅ Completed processing event {} for user {}", event_id, user_id),
                 Err(e) => {
                     eprintln!("   ❌ Failed to process event {} for user {}: {}", event_id, user_id, e);
@@ -218,7 +217,7 @@ async fn discover_event_ids(bucket: &str, user_id: &str) -> Result<Vec<String>, 
     Ok(event_ids)
 }
 
-async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks_prefix: &str, thumbnails_prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks_prefix: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     let region = Region::new("nyc3");
     let endpoint_url = env::var("DO_SPACES_ENDPOINT")
@@ -259,14 +258,10 @@ async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks
 
             let base = filename.trim_end_matches(&format!(".{}", ext));
             let watermark_key = format!("{}{}-watermark.{}", watermarks_prefix, base, ext);
-            let thumbnail_key = format!("{}{}-thumbnail.{}", thumbnails_prefix, base, ext);
 
-            // Check if both watermark and thumbnail already exist
-            let watermark_exists = client.head_object().bucket(bucket).key(&watermark_key).send().await.is_ok();
-            let thumbnail_exists = client.head_object().bucket(bucket).key(&thumbnail_key).send().await.is_ok();
-
-            if watermark_exists && thumbnail_exists {
-                println!("⏭️  Skipping already processed: {}", filename);
+            // Check if watermark already exists
+            if client.head_object().bucket(bucket).key(&watermark_key).send().await.is_ok() {
+                println!("⏭️  Skipping already watermarked: {}", filename);
                 continue;
             }
 
@@ -306,91 +301,52 @@ async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks
 
                     let (orig_width, orig_height) = img.dimensions();
 
-                    // Create thumbnail (200px max dimension)
-                    if !thumbnail_exists {
-                        println!("🖼️  Creating thumbnail...");
-                        let thumbnail_max = 200u32;
-                        let thumbnail_img = if orig_width > thumbnail_max || orig_height > thumbnail_max {
-                            let ratio = if orig_width > orig_height {
-                                thumbnail_max as f32 / orig_width as f32
-                            } else {
-                                thumbnail_max as f32 / orig_height as f32
-                            };
-                            let new_width = (orig_width as f32 * ratio) as u32;
-                            let new_height = (orig_height as f32 * ratio) as u32;
-                            println!("   📐 Thumbnail size: {}x{}", new_width, new_height);
-                            img.resize_exact(new_width, new_height, imageops::FilterType::Lanczos3)
+                    // Resize image to max 800px for preview (lower quality for protection)
+                    let max_dimension = 800u32;
+                    let resized_img = if orig_width > max_dimension || orig_height > max_dimension {
+                        let ratio = if orig_width > orig_height {
+                            max_dimension as f32 / orig_width as f32
                         } else {
-                            img.clone()
+                            max_dimension as f32 / orig_height as f32
                         };
+                        let new_width = (orig_width as f32 * ratio) as u32;
+                        let new_height = (orig_height as f32 * ratio) as u32;
+                        println!("📐 Resizing image from {}x{} to {}x{}", orig_width, orig_height, new_width, new_height);
 
-                        let mut thumb_buf = Cursor::new(Vec::new());
-                        // Moderate quality for thumbnails (70%)
-                        thumbnail_img.write_to(&mut thumb_buf, image::ImageOutputFormat::Jpeg(70))?;
-                        let thumb_bytes = thumb_buf.into_inner();
-
-                        println!("   📤 Uploading thumbnail ({:.1}KB)...", thumb_bytes.len() as f64 / 1024.0);
-                        match client.put_object()
-                            .bucket(bucket)
-                            .key(&thumbnail_key)
-                            .body(thumb_bytes.into())
-                            .acl(ObjectCannedAcl::PublicRead)
-                            .send()
-                            .await {
-                            Ok(_) => println!("   ✅ Thumbnail uploaded: {}", thumbnail_key),
-                            Err(e) => eprintln!("   ❌ Failed to upload thumbnail: {}", e),
-                        };
-                    }
-
-                    // Create watermarked preview
-                    if !watermark_exists {
-                        // Resize image to max 800px for preview (lower quality for protection)
-                        let max_dimension = 800u32;
-                        let resized_img = if orig_width > max_dimension || orig_height > max_dimension {
-                            let ratio = if orig_width > orig_height {
-                                max_dimension as f32 / orig_width as f32
-                            } else {
-                                max_dimension as f32 / orig_height as f32
-                            };
-                            let new_width = (orig_width as f32 * ratio) as u32;
-                            let new_height = (orig_height as f32 * ratio) as u32;
-                            println!("📐 Resizing for watermark from {}x{} to {}x{}", orig_width, orig_height, new_width, new_height);
-
-                            // For large images, use a more memory-efficient filter
-                            let filter = if file_size_mb > 20.0 {
-                                imageops::FilterType::Nearest  // Fastest and most memory efficient
-                            } else {
-                                imageops::FilterType::Nearest  // Already using Nearest
-                            };
-                            img.resize_exact(new_width, new_height, filter)
+                        // For large images, use a more memory-efficient filter
+                        let filter = if file_size_mb > 20.0 {
+                            imageops::FilterType::Nearest  // Fastest and most memory efficient
                         } else {
-                            println!("📐 Image size {}x{} is already optimal", orig_width, orig_height);
-                            img
+                            imageops::FilterType::Nearest  // Already using Nearest
                         };
+                        img.resize_exact(new_width, new_height, filter)
+                    } else {
+                        println!("📐 Image size {}x{} is already optimal", orig_width, orig_height);
+                        img
+                    };
 
-                        println!("🖋️  Watermarking image...");
-                        let watermarked = watermark_image(resized_img, "REFLEXU PREVIEW");
+                    println!("🖋️ Watermarking image...");
+                    let watermarked = watermark_image(resized_img, "REFLEXU PREVIEW");
 
-                        let mut buf = Cursor::new(Vec::new());
-                        // Very low JPEG quality (25%) to discourage unauthorized use
-                        watermarked.write_to(&mut buf, image::ImageOutputFormat::Jpeg(25))?;
-                        let final_bytes = buf.into_inner();
+                    let mut buf = Cursor::new(Vec::new());
+                    // Very low JPEG quality (25%) to discourage unauthorized use
+                    watermarked.write_to(&mut buf, image::ImageOutputFormat::Jpeg(25))?;
+                    let final_bytes = buf.into_inner();
 
-                        println!("📤 Uploading watermarked image ({:.1}MB)...", final_bytes.len() as f64 / 1024.0 / 1024.0);
-                        match client.put_object()
-                            .bucket(bucket)
-                            .key(&watermark_key)
-                            .body(final_bytes.into())
-                            .acl(ObjectCannedAcl::PublicRead)
-                            .send()
-                            .await {
-                            Ok(_) => println!("✅ Watermark uploaded: {}", watermark_key),
-                            Err(e) => {
-                                eprintln!("❌ Failed to upload watermark: {}", e);
-                                continue;
-                            }
-                        };
-                    }
+                    println!("📤 Uploading watermarked image ({:.1}MB)...", final_bytes.len() as f64 / 1024.0 / 1024.0);
+                    match client.put_object()
+                        .bucket(bucket)
+                        .key(&watermark_key)
+                        .body(final_bytes.into())
+                        .acl(ObjectCannedAcl::PublicRead)
+                        .send()
+                        .await {
+                        Ok(_) => println!("✅ Uploaded: {}", watermark_key),
+                        Err(e) => {
+                            eprintln!("❌ Failed to upload {}: {}", watermark_key, e);
+                            continue;
+                        }
+                    };
                 }
                 "mp4" | "mov" | "webm" => {
                     // Skip very large videos to avoid resource issues
@@ -400,44 +356,39 @@ async fn process_files_in_paths(bucket: &str, originals_prefix: &str, watermarks
                         continue;
                     }
 
-                    // Create video thumbnail (first frame extraction would require ffmpeg processing)
-                    // For now, we'll skip thumbnail generation for videos
+                    println!("🎬 Watermarking video ({:.1}MB)...", file_size_mb);
 
-                    if !watermark_exists {
-                        println!("🎬 Watermarking video ({:.1}MB)...", file_size_mb);
+                    // Add timeout to prevent hanging
+                    let timeout_duration = Duration::from_secs(300); // 5 minutes max
+                    let content = match tokio::time::timeout(timeout_duration, watermark_video(&body, "REFLEXU PREVIEW")).await {
+                        Ok(Ok(v)) => {
+                            println!("✅ Video watermarking completed, size: {} bytes", v.len());
+                            v
+                        },
+                        Ok(Err(e)) => {
+                            eprintln!("❌ Failed to watermark video {}: {}", filename, e);
+                            continue;
+                        },
+                        Err(_) => {
+                            eprintln!("❌ Video watermarking timed out after 5 minutes: {}", filename);
+                            continue;
+                        }
+                    };
 
-                        // Add timeout to prevent hanging
-                        let timeout_duration = Duration::from_secs(300); // 5 minutes max
-                        let content = match tokio::time::timeout(timeout_duration, watermark_video(&body, "REFLEXU PREVIEW")).await {
-                            Ok(Ok(v)) => {
-                                println!("✅ Video watermarking completed, size: {} bytes", v.len());
-                                v
-                            },
-                            Ok(Err(e)) => {
-                                eprintln!("❌ Failed to watermark video {}: {}", filename, e);
-                                continue;
-                            },
-                            Err(_) => {
-                                eprintln!("❌ Video watermarking timed out after 5 minutes: {}", filename);
-                                continue;
-                            }
-                        };
-
-                        println!("📤 Uploading watermarked video to: {}", watermark_key);
-                        match client.put_object()
-                            .bucket(bucket)
-                            .key(&watermark_key)
-                            .body(content.into())
-                            .acl(ObjectCannedAcl::PublicRead)
-                            .send()
-                            .await {
-                            Ok(_) => println!("✅ Video upload completed: {}", watermark_key),
-                            Err(e) => {
-                                eprintln!("❌ Failed to upload video {}: {}", watermark_key, e);
-                                continue;
-                            }
-                        };
-                    }
+                    println!("📤 Uploading watermarked video to: {}", watermark_key);
+                    match client.put_object()
+                        .bucket(bucket)
+                        .key(&watermark_key)
+                        .body(content.into())
+                        .acl(ObjectCannedAcl::PublicRead)
+                        .send()
+                        .await {
+                        Ok(_) => println!("✅ Video upload completed: {}", watermark_key),
+                        Err(e) => {
+                            eprintln!("❌ Failed to upload video {}: {}", watermark_key, e);
+                            continue;
+                        }
+                    };
                 }
                 _ => {
                     println!("❌ Unsupported file type: {}", filename);

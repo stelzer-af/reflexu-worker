@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Rust-based watermarking worker service that processes images and videos from Digital Ocean Spaces, adding "REFLEXU PREVIEW" watermarks and generating thumbnails. The project can run as a one-time processor or continuous worker with configurable intervals.
+This is a Rust-based watermarking worker service that processes images and videos from Digital Ocean Spaces, adding "REFLEXU PREVIEW" watermarks. The project can run as a one-time processor or continuous worker with configurable intervals.
 
 ## Storage Structure
 
@@ -16,7 +16,6 @@ DigitalOcean Spaces Bucket/
           └── events/
               └── {eventId}/
                   ├── originals/          # Private original files (source)
-                  ├── thumbnails/         # Public thumbnail files (generated)
                   └── watermarks/         # Public watermarked files (generated)
 ```
 
@@ -57,9 +56,9 @@ Optional configuration:
 2. **process_files()** - Main processing function that:
    - Discovers users and their events in the bucket structure
    - Lists objects in `users/{userId}/events/{eventId}/originals/` from S3-compatible storage
-   - Skips already processed files (checks for existing watermarked and thumbnail versions)
+   - Skips already processed files (checks for existing watermarked versions)
    - Processes images (JPG, PNG) and videos (MP4, MOV, WEBM)
-   - Uploads results to `watermarks/` and `thumbnails/` prefixes within each event
+   - Uploads watermarked results to `watermarks/` prefix within each event
 
 3. **Watermarking Functions**:
    - `watermark_image()` - Adds diagonal repeated text watermarks to images using imageproc
@@ -77,10 +76,9 @@ Optional configuration:
 - **Watermark Pattern**: Logo + text pattern repeated across media (5 horizontal lines)
 - **Font Handling**: Embedded DejaVu Sans Bold font for consistent text rendering
 - **Error Handling**: Graceful failures with detailed logging, continues processing other files
-- **Output Generation**:
-  - **Thumbnails**: 200px max dimension, 70% JPEG quality for quick preview
-  - **Watermarks**: Images resized to max 800px, 25% JPEG quality for protection (97% size reduction)
-  - **Videos**: Resized to 720p, CRF 35, 1.5Mbps bitrate (98% size reduction)
+- **Quality Reduction for Protection**:
+  - Images: Resized to max 800px, 25% JPEG quality (97% size reduction)
+  - Videos: Resized to 720p, CRF 35, 1.5Mbps bitrate (98% size reduction)
 - **Performance Optimizations**:
   - Fast resize algorithm (Nearest filter) for 88% faster image resizing
   - Optimized JPEG encoding parameters
