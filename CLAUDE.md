@@ -4,7 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Rust-based watermarking worker service that processes images and videos from Digital Ocean Spaces, adding "REFLEXU PREVIEW" watermarks. The project can run as a one-time processor or continuous worker with configurable intervals.
+This is a Rust-based watermarking worker service that processes images and videos from Digital Ocean Spaces, adding "REFLEXU PREVIEW" watermarks and generating thumbnails. The project can run as a one-time processor or continuous worker with configurable intervals.
+
+## Storage Structure
+
+The worker processes files organized in the following structure:
+```
+DigitalOcean Spaces Bucket/
+  └── users/
+      └── {userId}/
+          └── events/
+              └── {eventId}/
+                  ├── originals/          # Private original files (source)
+                  ├── thumbnails/         # Public thumbnail files (generated)
+                  └── watermarks/         # Public watermarked files (generated)
+```
 
 ## Common Commands
 
@@ -41,10 +55,11 @@ Optional configuration:
    - Includes busy flag protection to prevent overlapping processing cycles
 
 2. **process_files()** - Main processing function that:
-   - Lists objects in `originals/` prefix from S3-compatible storage
-   - Skips already processed files (checks for existing watermarked versions)
+   - Discovers users and their events in the bucket structure
+   - Lists objects in `users/{userId}/events/{eventId}/originals/` from S3-compatible storage
+   - Skips already processed files (checks for existing watermarked and thumbnail versions)
    - Processes images (JPG, PNG) and videos (MP4, MOV, WEBM)
-   - Uploads watermarked results to `watermarks/` prefix
+   - Uploads results to `watermarks/` and `thumbnails/` prefixes within each event
 
 3. **Watermarking Functions**:
    - `watermark_image()` - Adds diagonal repeated text watermarks to images using imageproc
@@ -54,18 +69,22 @@ Optional configuration:
 
 ### Key Design Decisions
 
-- **Resource Management**: Videos over 300MB are skipped, single-threaded FFmpeg processing
+- **Resource Management**:
+  - Videos over 300MB are skipped, single-threaded FFmpeg processing
+  - Large images (>20MB) use temp file approach with memory-mapped I/O to avoid memory exhaustion
 - **Timeout Protection**: 5-minute timeout for video processing to prevent hanging
 - **Concurrency Protection**: Busy flag prevents overlapping processing cycles in continuous mode
 - **Watermark Pattern**: Logo + text pattern repeated across media (5 horizontal lines)
 - **Font Handling**: Embedded DejaVu Sans Bold font for consistent text rendering
 - **Error Handling**: Graceful failures with detailed logging, continues processing other files
-- **Quality Reduction for Protection**:
-  - Images: Resized to max 800px, 25% JPEG quality (97% size reduction)
-  - Videos: Resized to 720p, CRF 35, 1.5Mbps bitrate (98% size reduction)
+- **Output Generation**:
+  - **Thumbnails**: 200px max dimension, 70% JPEG quality for quick preview
+  - **Watermarks**: Images resized to max 800px, 25% JPEG quality for protection (97% size reduction)
+  - **Videos**: Resized to 720p, CRF 35, 1.5Mbps bitrate (98% size reduction)
 - **Performance Optimizations**:
   - Fast resize algorithm (Nearest filter) for 88% faster image resizing
   - Optimized JPEG encoding parameters
+  - Memory-efficient processing for large images using temp files and memory-mapped I/O
   - Total processing: ~3.5s for image+video (46% faster than baseline)
 
 ## Dependencies
